@@ -43,9 +43,28 @@ analyticsRouter.get(
 
 analyticsRouter.get(
   '/timeline',
-  validate(z.object({ months: z.coerce.number().int().min(1).max(36).default(12) }).strip(), 'query'),
+  validate(
+    z
+      .object({
+        months: z.coerce.number().int().min(1).max(36).default(12),
+        /**
+         * The current month is still accumulating charges, so including it
+         * makes a chart look like spending collapsed. Callers plotting
+         * history ask for complete months; callers reporting "so far this
+         * month" leave it in.
+         */
+        includeCurrentMonth: z.coerce.boolean().default(true),
+      })
+      .strip(),
+    'query',
+  ),
   asyncHandler(async (req, res) => {
-    res.json({ timeline: await spendTimeline(req.user.id, { months: req.query.months }) });
+    res.json({
+      timeline: await spendTimeline(req.user.id, {
+        months: req.query.months,
+        includeCurrentMonth: req.query.includeCurrentMonth,
+      }),
+    });
   }),
 );
 
