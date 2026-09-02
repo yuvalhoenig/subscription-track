@@ -759,6 +759,21 @@ test('the sole remaining admin cannot demote themselves', async () => {
   assert.equal(me.data.user.is_admin, true);
 });
 
+// ── Cron trigger endpoints ───────────────────────────────────────
+
+test('cron endpoints reject requests without a valid CRON_SECRET', async () => {
+  // In this test environment CRON_SECRET is unset, so even the "correct"
+  // header of `Bearer ` (empty secret) must still be refused — an empty
+  // configured secret must never be treated as "no check needed".
+  const noAuth = await api('GET', '/api/cron/notifications');
+  assert.equal(noAuth.status, 403);
+
+  const wrongAuth = await api('GET', '/api/cron/nightly-insights', {
+    token: 'whatever-someone-guesses',
+  });
+  assert.equal(wrongAuth.status, 403);
+});
+
 // ── One-click cancellation links ───────────────────────────────
 
 test('a cancel link previews without cancelling, then cancels on confirm', async () => {

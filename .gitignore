@@ -19,3 +19,4 @@ tmp/
 .cache/
 packages/desktop/out/
 packages/web/dist/
+dump.rdb

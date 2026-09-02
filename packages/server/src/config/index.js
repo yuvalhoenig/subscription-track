@@ -121,6 +121,17 @@ export const config = Object.freeze({
     nightlyInsights: process.env.CRON_NIGHTLY_INSIGHTS || '0 3 * * *',
   },
 
+  /**
+   * Shared secret for the HTTP cron-trigger endpoints (`/api/cron/*`),
+   * used on serverless deploys where nothing keeps a `node-cron` process
+   * alive — Vercel Cron Jobs calls these routes on a schedule instead, and
+   * sends this value back as `Authorization: Bearer <secret>` so the route
+   * can tell a real cron firing from an internet rando's guess at the URL.
+   */
+  cron: {
+    secret: process.env.CRON_SECRET || '',
+  },
+
   demo: {
     email: process.env.DEMO_EMAIL || 'demo@subtrack.app',
     password: process.env.DEMO_PASSWORD || 'DemoPass123!',
@@ -153,6 +164,17 @@ export function assertProductionConfig() {
     if (secret.length < 32) problems.push(`${name} must be at least 32 characters`);
   }
   if (!process.env.DATABASE_URL) problems.push('DATABASE_URL must be set in production');
+  // Only meaningful on a serverless deploy (nothing else calls this route),
+  // so an empty secret is a warning rather than a hard boot failure here.
+  if (!config.cron.secret) {
+    // eslint-disable-next-line no-console -- config boots before the logger exists
+    console.warn(
+      '[config] CRON_SECRET is not set. The /api/cron/* endpoints will reject ' +
+        'every request until it is — fine if a long-running process handles ' +
+        'scheduling instead (ENABLE_SCHEDULER=true), a problem on a ' +
+        'serverless deploy where that is the only way jobs run.',
+    );
+  }
   if (problems.length) {
     throw new Error(`Refusing to start with unsafe configuration:\n  - ${problems.join('\n  - ')}`);
   }

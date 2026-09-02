@@ -5,6 +5,9 @@
   "description": "SubTrack REST API, AI engine and background jobs",
   "type": "module",
   "main": "src/index.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
