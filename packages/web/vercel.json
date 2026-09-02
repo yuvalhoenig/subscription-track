@@ -3,7 +3,7 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "https://REPLACE-WITH-YOUR-API-PROJECT.vercel.app/api/$1"
+      "destination": "https://subscription-track-beta.vercel.app/api/$1"
     },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
