@@ -52,34 +52,97 @@ pooled one for the Vercel env var below.
 
 ## 2. Vercel — the API
 
-1. [Import the repo](https://vercel.com/new) as a **new project**. When
-   asked for the **Root Directory**, choose `packages/server`. Framework
-   preset: **Other**.
-2. Under **Environment Variables**, add (Production, and Preview if you want
-   preview deploys to work too):
+### 2.1 Generate the secrets first
+
+Open a terminal on your Mac (not the app repo, doesn't matter where) and run
+these three commands one at a time. Copy each output somewhere temporary
+(a Notes doc, a scratch text file) — you'll paste them into Vercel in a
+minute.
+
+```
+openssl rand -hex 48
+```
+Copy this output. Label it `JWT_ACCESS_SECRET`.
+
+```
+openssl rand -hex 48
+```
+Run it **again** — it must be a different value. Label it `JWT_REFRESH_SECRET`.
+
+```
+openssl rand -hex 32
+```
+Copy this one too. Label it `CRON_SECRET`.
+
+### 2.2 Import the project
+
+1. Go to **https://vercel.com/new** in your browser. Log in with GitHub if
+   it asks (use the same GitHub account that owns `yuvalhoenig/subscription-track`).
+2. You'll see a list of your GitHub repos under **"Import Git Repository."**
+   Find `subscription-track` in the list and click the **Import** button
+   next to it.
+   - If you don't see it, click **"Adjust GitHub App Permissions"** (a link
+     usually shown above or below the list) and grant Vercel access to that
+     repo specifically, then come back to this page.
+3. You land on a **"Configure Project"** screen. Set these fields:
+   - **Project Name**: type `subtrack-api` (this becomes part of the URL:
+     `subtrack-api.vercel.app` — if that name is taken, Vercel will tell you
+     and suggest a variant; whatever it ends up being, remember it).
+   - **Framework Preset**: click the dropdown and pick **"Other"**.
+   - **Root Directory**: click **Edit** next to it, a file-tree picker opens.
+     Click into `packages`, then click into `server`, then click **Continue**
+     (or **Select**) so the field shows `packages/server`.
+   - Leave **Build and Output Settings** collapsed/default — don't touch it.
+4. Before clicking Deploy, expand the **"Environment Variables"** section on
+   that same screen (it's a collapsible panel further down the page). Add
+   each row below one at a time: type the key into the left box, the value
+   into the right box, then click **Add** (or press Enter) before starting
+   the next one.
 
    | Key | Value |
    |---|---|
-   | `DATABASE_URL` | the **pooled** (port 6543) connection string from Supabase |
+   | `DATABASE_URL` | Supabase's **pooled** connection string (port `6543`) — see step 1.2. It looks like `postgresql://postgres.xxxxxxxx:<password>@aws-0-xx-xxxx-1.pooler.supabase.com:6543/postgres` |
    | `PGSSLMODE` | `require` |
-   | `JWT_ACCESS_SECRET` | output of `openssl rand -hex 48` |
-   | `JWT_REFRESH_SECRET` | a **different** `openssl rand -hex 48` |
-   | `CRON_SECRET` | output of `openssl rand -hex 32` |
-   | `APP_URL` | the web project's URL (fill in after step 3 — a placeholder is fine for now, e.g. `https://subtrack-web.vercel.app`) |
-   | `CORS_ORIGINS` | same URL as `APP_URL` |
-   | `ANTHROPIC_API_KEY` | your Claude API key, for real AI features (optional — the app runs on deterministic heuristics without it) |
+   | `JWT_ACCESS_SECRET` | the first value you generated above |
+   | `JWT_REFRESH_SECRET` | the second value you generated above |
+   | `CRON_SECRET` | the third value you generated above |
+   | `APP_URL` | `https://subtrack-web.vercel.app` (a placeholder — you'll fix this for real in step 3.5, once the web project actually exists) |
+   | `CORS_ORIGINS` | same value as `APP_URL` above |
    | `REDIS_ENABLED` | `false` |
    | `NODE_ENV` | `production` |
+   | `ANTHROPIC_API_KEY` | your Claude API key from **https://console.anthropic.com/settings/keys**, if you have one — optional, skip this row entirely if you don't. Without it, AI features (chat, insights, categorisation) still work but use rule-based logic instead of Claude. |
 
-   Leave `SMTP_*` unset for now if you don't have a transactional-email
-   provider yet — e-mails (verification, password reset, renewal reminders)
-   just get logged instead of sent, and nothing else breaks. Add them later
-   when you have one (Resend, Postmark, SES all work over standard SMTP).
+   Every field defaults to applying to **Production, Preview, and
+   Development** — that's fine, leave it as-is.
+5. Click the big **Deploy** button at the bottom.
+6. Wait for the build to finish — you'll see a log stream, then a
+   confetti/"Congratulations" screen with a screenshot preview. This
+   usually takes 30–90 seconds.
 
-3. Deploy. Once it's live, note the project's URL — something like
-   `https://subtrack-api.vercel.app`.
-4. Sanity-check it: `curl https://subtrack-api.vercel.app/api/health` should
-   return `{"status":"ok","database":true,...}`.
+### 2.3 Find the project's URL and verify it
+
+1. Click **"Continue to Dashboard"** (or click the project name at the top).
+2. On the project's overview page, near the top, there's a row of small
+   links/domains — one will look like `subtrack-api.vercel.app` (or
+   `subtrack-api-<random>.vercel.app` if the plain name was taken). Click
+   the copy icon next to it, or just click it to open it in a new tab.
+3. **Write this URL down** — you need it for step 3. Call it your **API URL**.
+4. Test it actually works: in your terminal, run (replacing with your real URL):
+   ```
+   curl https://subtrack-api.vercel.app/api/health
+   ```
+   You should get back something like:
+   ```
+   {"status":"ok","database":true,"cache":"memory","ai":"heuristic","uptimeSeconds":0,"timestamp":"..."}
+   ```
+   - `"database":true` means it successfully reached Supabase — if this is
+     `false` or the request errors out, your `DATABASE_URL` is wrong; go to
+     **Project Settings → Environment Variables**, fix it, then go to the
+     **Deployments** tab and click **Redeploy** on the latest one (see the
+     "⋯" menu next to it).
+   - If the whole `curl` fails (connection error, not JSON), the deploy
+     itself likely failed — check the **Deployments** tab for a red ✗ and
+     click into it to read the build log.
 
 **Why `REDIS_ENABLED=false`:** Redis here only accelerates AI response
 caching and rate-limit counters — the app is explicitly designed to fall
@@ -93,25 +156,112 @@ Upstash Redis (on the Vercel Marketplace) is a drop-in `REDIS_URL`.
 
 ## 3. Vercel — the web app
 
-1. [Import the repo](https://vercel.com/new) again as a **second, separate
-   project**. Root Directory: `packages/web`. Framework preset: **Vite**
-   (auto-detected).
-2. Before deploying, edit `packages/web/vercel.json` in the repo and replace
-   `REPLACE-WITH-YOUR-API-PROJECT` with the API project's actual domain from
-   step 2 (e.g. `subtrack-api.vercel.app`), then commit and push. This file
-   makes `/api/*` on the web app's own domain transparently proxy to the API
-   project — the browser only ever talks to one origin, so there's no CORS
-   or cross-site-cookie configuration to fight with, and the refresh-token
-   cookie works exactly like it does in local dev.
-3. Environment variable: leave `VITE_API_URL` **unset** (or empty) in
-   production — the app calls `/api/...` as a relative path, which the
-   rewrite above sends to your API project. `VITE_API_URL` is only for
-   local dev, where Vite's own dev-server proxy plays the same role.
-4. Deploy. Once it's live, go back to the **API project's** environment
-   variables and set `APP_URL` and `CORS_ORIGINS` to this web app's real
-   URL (replacing the placeholder from step 2), then redeploy the API
-   project so the change takes effect.
-5. Visit the web app's URL and log in with the admin account from step 1.4.
+### 3.1 Point the web app's proxy at your real API URL first
+
+This has to happen **before** you deploy the web project, because it's a
+file in the repo, not a dashboard setting.
+
+1. On your Mac, in your terminal, `cd` into the repo (the one you cloned
+   earlier) and open the file in a text editor:
+   ```
+   cd subscription-track
+   open -e packages/web/vercel.json
+   ```
+   (`open -e` opens it in TextEdit. Use any editor you like instead — VS
+   Code, `nano packages/web/vercel.json`, whatever's easiest.)
+2. You'll see this:
+   ```json
+   {
+     "$schema": "https://openapi.vercel.sh/vercel.json",
+     "rewrites": [
+       {
+         "source": "/api/(.*)",
+         "destination": "https://REPLACE-WITH-YOUR-API-PROJECT.vercel.app/api/$1"
+       },
+       { "source": "/(.*)", "destination": "/index.html" }
+     ]
+   }
+   ```
+3. Replace `REPLACE-WITH-YOUR-API-PROJECT.vercel.app` with your actual API
+   URL from step 2.3 (just the domain — keep `https://` and the rest of the
+   path exactly as-is). For example, if your API URL is
+   `https://subtrack-api.vercel.app`, the line becomes:
+   ```json
+   "destination": "https://subtrack-api.vercel.app/api/$1"
+   ```
+4. Save the file, then commit and push it:
+   ```
+   git add packages/web/vercel.json
+   git commit -m "Point web app proxy at the deployed API"
+   git push origin claude/subscription-platform-ai-gjdsk0
+   ```
+
+### 3.2 Import the project
+
+1. Go to **https://vercel.com/new** again.
+2. Find `subscription-track` in the repo list again and click **Import**
+   next to it — yes, the same repo again; Vercel lets you create multiple
+   projects from one repo, each with its own Root Directory.
+3. On the **"Configure Project"** screen:
+   - **Project Name**: type `subtrack-web`.
+   - **Framework Preset**: it should auto-detect **"Vite"** once you set the
+     Root Directory below (do that first, then check this field).
+   - **Root Directory**: click **Edit**, navigate into `packages` → `web`,
+     click **Continue**/**Select** so it shows `packages/web`.
+   - **Build and Output Settings**: leave on default (Vercel will use
+     `npm run build` and output directory `dist` automatically once it
+     detects Vite — you don't need to type anything here).
+
+### 3.3 Environment variables (there's only one, and it's optional to skip)
+
+Expand **"Environment Variables"** on the same screen. You do **not** need
+to add `VITE_API_URL` — leave it out entirely. The app calls `/api/...` as
+a relative path in production, and the `vercel.json` rewrite you just
+committed sends that to your API project. (`VITE_API_URL` only matters for
+local dev on your Mac, where it's already set up separately.)
+
+Skip this section and go straight to Deploy.
+
+### 3.4 Deploy and find its URL
+
+1. Click **Deploy**. Wait for the build (Vite builds are usually fast, under
+   a minute).
+2. Same as before: click **"Continue to Dashboard"**, find the domain near
+   the top of the project page (e.g. `subtrack-web.vercel.app`), and open it
+   in a new tab to confirm the SubTrack login page loads.
+3. **Write this URL down** too — call it your **web URL**.
+
+### 3.5 Go back and fix the API project's placeholder URL
+
+Step 2.2 set `APP_URL` and `CORS_ORIGINS` on the API project to a guessed
+placeholder, before the web project existed. Now that you have the real
+web URL, fix it:
+
+1. Go to **https://vercel.com/dashboard**, click into the **`subtrack-api`**
+   project (not the web one).
+2. Click the **Settings** tab (top nav inside the project), then
+   **Environment Variables** in the left sidebar.
+3. Find the row for `APP_URL`. Click the **"⋯"** (three dots) at the right
+   end of that row, choose **Edit**, clear the value box, type in your real
+   web URL from step 3.4 (e.g. `https://subtrack-web.vercel.app`), and save.
+4. Do the exact same thing for the `CORS_ORIGINS` row — same value.
+5. These changes don't apply to the already-running deployment automatically
+   — you have to redeploy. Click the **Deployments** tab, find the most
+   recent (top) row, click its **"⋯"** menu, and choose **Redeploy**. Confirm
+   in the dialog that pops up. Wait for it to finish (green checkmark).
+
+### 3.6 Log in
+
+Open your web URL in a browser and sign in with the admin account you
+created in step 1.4 (`yuvalhoenig15@gmail.com` / `A1a2a3a4a6!`). You should
+land on the dashboard and see **"Admin Panel"** in the sidebar.
+
+If login fails with a network error rather than a "wrong password" message,
+the most likely cause is the proxy in step 3.1 pointing at the wrong API
+domain — double check `packages/web/vercel.json` matches your actual API
+URL exactly, redeploy the web project if you change it (Deployments tab →
+⋯ → Redeploy, same as 3.5.5), and check the browser's dev tools Network tab
+(F12 → Network) for what URL the failing request actually went to.
 
 ---
 
