@@ -1,0 +1,19 @@
+{
+  "name": "@subtrack/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SubTrack desktop app for macOS (Electron)",
+  "main": "src/main.js",
+  "scripts": {
+    "dev": "electron . --dev",
+    "start": "electron .",
+    "build": "electron-builder --mac",
+    "build:dir": "electron-builder --mac --dir",
+    "syntax": "node --check src/preload.cjs"
+  },
+  "devDependencies": {
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8"
+  },
+  "type": "module"
+}

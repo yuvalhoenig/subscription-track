@@ -1,0 +1,18 @@
+{
+  "name": "@subtrack/shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Domain logic shared between the SubTrack API, web app and desktop app",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./billing": "./src/billing.js",
+    "./categories": "./src/categories.js",
+    "./catalog": "./src/catalog.js",
+    "./format": "./src/format.js"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  }
+}
