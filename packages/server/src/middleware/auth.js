@@ -28,7 +28,7 @@ async function loadUser(userId) {
   return cache.wrap(`user:${userId}`, USER_CACHE_TTL, async () =>
     one(
       `SELECT id, email, name, avatar_url, currency, locale, timezone,
-              email_verified, monthly_budget, preferences, created_at
+              email_verified, is_admin, monthly_budget, preferences, created_at
          FROM users WHERE id = $1`,
       [userId],
     ),

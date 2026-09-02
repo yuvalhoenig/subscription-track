@@ -121,8 +121,17 @@ export function passwordResetEmail({ to, name, token }) {
   });
 }
 
-export function renewalReminderEmail({ to, name, subscription, daysUntil, monthlyTotal }) {
+export function renewalReminderEmail({ to, name, subscription, daysUntil, monthlyTotal, cancelUrl }) {
   const when = daysUntil === 0 ? 'today' : daysUntil === 1 ? 'tomorrow' : `in ${daysUntil} days`;
+  // A plain text link rather than a second button: one strong call to
+  // action (review in the app) plus a quieter escape hatch reads better
+  // than two competing buttons, and keeps `layout()`'s single-CTA shape.
+  const cancelLine = cancelUrl
+    ? `<p style="margin-top:20px;font-size:13px;color:#64748b">
+         Don't want it? <a href="${cancelUrl}" style="color:#ef4444">Cancel ${subscription.name}</a>
+         — no sign-in needed.
+       </p>`
+    : '';
   return send({
     to,
     subject: `${subscription.name} renews ${when} — ${subscription.currency} ${subscription.cost}`,
@@ -133,7 +142,8 @@ export function renewalReminderEmail({ to, name, subscription, daysUntil, monthl
              <strong>${subscription.renewal_date}</strong> for
              <strong>${subscription.currency} ${subscription.cost}</strong>
              (${subscription.billing_cycle}).</p>
-             <p>Your current tracked spend is <strong>${subscription.currency} ${monthlyTotal}/month</strong>.</p>`,
+             <p>Your current tracked spend is <strong>${subscription.currency} ${monthlyTotal}/month</strong>.</p>
+             ${cancelLine}`,
       cta: { href: `${config.appUrl}/subscriptions/${subscription.id}`, label: 'Review this subscription' },
     }),
   });

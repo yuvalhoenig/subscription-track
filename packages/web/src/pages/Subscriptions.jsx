@@ -1,12 +1,12 @@
 /** Subscription list: filter, sort, edit, cancel, delete, export. */
 
 import { useEffect, useMemo, useState } from 'react';
-import { formatCurrency, formatRelativeDays, CYCLE_LABELS } from '@subtrack/shared';
+import { formatCurrency, formatRelativeDays, CYCLE_LABELS, cancelHelpFor } from '@subtrack/shared';
 import { AppShell } from '../components/AppShell.jsx';
 import { Icon } from '../components/Icon.jsx';
 import {
   Button, Input, Select, Empty, Loading, ErrorState, StatusBadge, Meter,
-  ServiceMark, ConfirmDialog, Segmented,
+  ServiceMark, ConfirmDialog, Segmented, Modal, Alert,
 } from '../components/ui.jsx';
 import { SubscriptionForm } from '../components/SubscriptionForm.jsx';
 import { api } from '../lib/api.js';
@@ -89,6 +89,22 @@ export function SubscriptionsPage() {
 
   const markUsed = (row) =>
     runAction(() => api.subscriptions.recordUsage(row.id), `Logged a use of ${row.name}.`);
+
+  /**
+   * Generate and copy a public cancellation link — the same one that goes
+   * out in renewal reminder e-mails. Anyone holding it can cancel this one
+   * subscription without signing in, so it's handed over deliberately
+   * (copy-to-clipboard) rather than shown inline.
+   */
+  const copyCancelLink = async (row) => {
+    try {
+      const { url } = await api.subscriptions.cancelLink(row.id);
+      await navigator.clipboard.writeText(url);
+      toast.success(`Cancel link for ${row.name} copied — valid for 60 days.`);
+    } catch (error) {
+      toast.error(error.message);
+    }
+  };
 
   const SortHeader = ({ label, sortKey, align }) => (
     <th
@@ -344,14 +360,24 @@ export function SubscriptionsPage() {
                             <Icon name="edit" size={14} />
                           </Button>
                           {row.status !== 'cancelled' ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setConfirming({ mode: 'cancel', row })}
-                              title="Cancel"
-                            >
-                              <Icon name="pause" size={14} />
-                            </Button>
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => copyCancelLink(row)}
+                                title="Copy a link anyone can use to cancel this — no sign-in needed"
+                              >
+                                <Icon name="external" size={14} />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setConfirming({ mode: 'cancel', row })}
+                                title="Cancel"
+                              >
+                                <Icon name="pause" size={14} />
+                              </Button>
+                            </>
                           ) : null}
                           <Button
                             variant="ghost"
@@ -382,25 +408,76 @@ export function SubscriptionsPage() {
       />
 
       <ConfirmDialog
-        open={Boolean(confirming)}
+        open={confirming?.mode === 'delete'}
         onClose={() => setConfirming(null)}
         loading={busy}
-        danger={confirming?.mode === 'delete'}
-        title={confirming?.mode === 'delete' ? 'Delete this subscription?' : 'Cancel this subscription?'}
-        confirmLabel={confirming?.mode === 'delete' ? 'Delete permanently' : 'Mark as cancelled'}
-        message={
-          confirming?.mode === 'delete'
-            ? `${confirming?.row.name} and its payment history will be removed for good. To keep the history and just stop counting the spend, cancel it instead.`
-            : `${confirming?.row.name} will stop counting towards your spend, but its payment history is kept.`
-        }
-        onConfirm={() => {
-          const { mode, row } = confirming;
-          return mode === 'delete'
-            ? runAction(() => api.subscriptions.remove(row.id), `${row.name} deleted.`)
-            : runAction(() => api.subscriptions.cancel(row.id), `${row.name} cancelled.`);
-        }}
+        danger
+        title="Delete this subscription?"
+        confirmLabel="Delete permanently"
+        message={`${confirming?.row.name} and its payment history will be removed for good. To keep the history and just stop counting the spend, cancel it instead.`}
+        onConfirm={() => runAction(() => api.subscriptions.remove(confirming.row.id), `${confirming.row.name} deleted.`)}
       />
+
+      {confirming?.mode === 'cancel' ? (
+        <CancelSubscriptionDialog
+          subscription={confirming.row}
+          busy={busy}
+          onClose={() => setConfirming(null)}
+          onMarkCancelled={() =>
+            runAction(() => api.subscriptions.cancel(confirming.row.id), `${confirming.row.name} marked as cancelled in SubTrack.`)}
+        />
+      ) : null}
     </AppShell>
+  );
+}
+
+/**
+ * The cancel dialog, split from the generic ConfirmDialog because
+ * cancelling here and cancelling for real are two different actions that
+ * must never be presented as one button. SubTrack has no account, API
+ * access, or credentials with any provider — it cannot reach out and stop
+ * a real charge. The real cancellation page is the primary action; marking
+ * it cancelled in SubTrack (which only affects what this app counts
+ * towards your spend) is offered afterwards, not instead of it.
+ */
+function CancelSubscriptionDialog({ subscription, busy, onClose, onMarkCancelled }) {
+  const help = cancelHelpFor(subscription.vendor_id ?? subscription.name);
+
+  return (
+    <Modal open onClose={onClose} title={`Cancel ${subscription.name}`}>
+      <div className="stack gap-4">
+        <Alert tone="info">
+          SubTrack cannot cancel {subscription.name} for you — it has no account or
+          access with {subscription.vendor_id ? subscription.name : 'this provider'}.
+          Only they can stop the charge.
+        </Alert>
+
+        <a
+          href={help.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn btn-primary btn-lg btn-block"
+          style={{ textDecoration: 'none' }}
+        >
+          <Icon name="external" size={16} />
+          {help.isDirect ? `Cancel on ${subscription.name}` : `Find out how to cancel ${subscription.name}`}
+        </a>
+        <p className="tiny muted center">
+          {help.isDirect
+            ? "Opens their real cancellation page in a new tab."
+            : "We don't have a direct link for this one — this searches for the right page."}
+        </p>
+
+        <div className="row gap-3" style={{ paddingTop: 'var(--space-2)', borderTop: '1px solid var(--border)' }}>
+          <span className="grow small secondary">
+            Already cancelled it there? Stop counting it here too.
+          </span>
+          <Button size="sm" onClick={onMarkCancelled} loading={busy}>
+            Mark cancelled in SubTrack
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

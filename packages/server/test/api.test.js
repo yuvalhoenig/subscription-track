@@ -79,7 +79,7 @@ test('registration creates an account with the default categories', async () => 
   const session = await newUser('register');
   assert.ok(session.accessToken);
   assert.ok(session.refreshToken);
-  assert.equal(session.user.emailVerified, false, 'a new address starts unverified');
+  assert.equal(session.user.email_verified, false, 'a new address starts unverified');
 
   const { data } = await api('GET', '/api/categories', { token: session.accessToken });
   assert.equal(data.categories.length, 10);
@@ -629,4 +629,186 @@ test('a malformed uuid is a 400, not a 500', async () => {
   const { accessToken: token } = await newUser('baduuid');
   const { status } = await api('GET', '/api/subscriptions/not-a-uuid', { token });
   assert.ok(status === 400 || status === 404, `got ${status}`);
+});
+
+// ── Admin panel ──────────────────────────────────────────────
+
+test('a non-admin is blocked from every admin route', async () => {
+  const { accessToken: token } = await newUser('nonadmin');
+  assert.equal((await api('GET', '/api/admin/stats', { token })).status, 403);
+  assert.equal((await api('GET', '/api/admin/users', { token })).status, 403);
+  assert.equal((await api('GET', '/api/admin/audit-log', { token })).status, 403);
+});
+
+test('an admin can list, inspect, promote, demote, force-logout and delete users', async () => {
+  const admin = await newUser('adminowner');
+  await query('UPDATE users SET is_admin = true WHERE id = $1', [admin.user.id]);
+  // The cached row from requireAuth must not shadow the flag just set.
+  await query(`SELECT 1`); // no-op; cache invalidation happens through the app, not here
+  const target = await newUser('supporttarget');
+
+  // Re-authenticate the admin so req.user reflects is_admin = true
+  // (the login response is cached per-request, not stale across calls).
+  const relogin = await api('POST', '/api/auth/login', { body: { email: admin.email, password: 'TestPassword123' } });
+  const adminToken = relogin.data.accessToken;
+
+  const stats = await api('GET', '/api/admin/stats', { token: adminToken });
+  assert.equal(stats.status, 200);
+  assert.ok(stats.data.users.total >= 2);
+
+  const list = await api('GET', '/api/admin/users', { token: adminToken });
+  assert.ok(list.data.users.some((u) => u.email === target.email));
+
+  const detail = await api('GET', `/api/admin/users/${target.user.id}`, { token: adminToken });
+  assert.equal(detail.status, 200);
+  assert.equal(detail.data.user.email, target.email);
+  assert.ok(Array.isArray(detail.data.recentPayments));
+  assert.ok(Array.isArray(detail.data.recentNotifications));
+  assert.ok('insightsGenerated' in detail.data.activity);
+
+  const promoted = await api('POST', `/api/admin/users/${target.user.id}/admin`, {
+    token: adminToken, body: { isAdmin: true },
+  });
+  assert.equal(promoted.data.is_admin, true);
+
+  const demoted = await api('POST', `/api/admin/users/${target.user.id}/admin`, {
+    token: adminToken, body: { isAdmin: false },
+  });
+  assert.equal(demoted.data.is_admin, false);
+
+  const forced = await api('POST', `/api/admin/users/${target.user.id}/logout-all`, { token: adminToken });
+  assert.equal(forced.status, 200);
+  assert.equal(typeof forced.data.revoked, 'number');
+
+  // Cannot delete yourself through the admin surface.
+  const selfDelete = await api('DELETE', `/api/admin/users/${admin.user.id}`, { token: adminToken });
+  assert.equal(selfDelete.status, 400);
+
+  // Deleting someone else must report success, not a foreign-key error
+  // from the audit-log insert that follows the deletion.
+  const deleted = await api('DELETE', `/api/admin/users/${target.user.id}`, { token: adminToken });
+  assert.equal(deleted.status, 200);
+  assert.equal(deleted.data.deleted, true);
+
+  const gone = await api('GET', `/api/admin/users/${target.user.id}`, { token: adminToken });
+  assert.equal(gone.status, 404);
+
+  const audit = await api('GET', '/api/admin/audit-log', { token: adminToken });
+  const actions = audit.data.entries.map((e) => e.action);
+  assert.ok(actions.includes('grant_admin'));
+  assert.ok(actions.includes('revoke_admin'));
+  assert.ok(actions.includes('force_logout'));
+  assert.ok(actions.includes('delete_user'));
+  // The deleted user's e-mail survives in `detail` even with no row to join.
+  const deleteEntry = audit.data.entries.find((e) => e.action === 'delete_user' && e.detail?.email === target.email);
+  assert.ok(deleteEntry, 'delete_user audit entry should carry the deleted email in detail');
+});
+
+test('an admin can create a pre-verified account directly, optionally as an admin', async () => {
+  const admin = await newUser('creatoradmin');
+  await query('UPDATE users SET is_admin = true WHERE id = $1', [admin.user.id]);
+  const relogin = await api('POST', '/api/auth/login', { body: { email: admin.email, password: 'TestPassword123' } });
+  const adminToken = relogin.data.accessToken;
+
+  const email = `created-${Date.now()}@example.com`;
+  const created = await api('POST', '/api/admin/users', {
+    token: adminToken,
+    body: { email, password: 'TestPassword123', name: 'Created User', isAdmin: true },
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.data.email, email);
+  assert.equal(created.data.email_verified, true);
+  assert.equal(created.data.is_admin, true);
+
+  // The new account can sign in immediately with no verification step.
+  const login = await api('POST', '/api/auth/login', { body: { email, password: 'TestPassword123' } });
+  assert.equal(login.status, 200);
+  assert.equal(login.data.user.is_admin, true);
+  assert.equal(login.data.user.email_verified, true);
+
+  // Duplicate e-mail is rejected.
+  const dupe = await api('POST', '/api/admin/users', {
+    token: adminToken,
+    body: { email, password: 'TestPassword123', name: 'Created User' },
+  });
+  assert.equal(dupe.status, 409);
+
+  const audit = await api('GET', '/api/admin/audit-log', { token: adminToken });
+  const entry = audit.data.entries.find((e) => e.action === 'create_user' && e.detail?.email === email);
+  assert.ok(entry, 'create_user audit entry should record the new e-mail');
+});
+
+test('the sole remaining admin cannot demote themselves', async () => {
+  const solo = await newUser('soloadmin');
+  await query('UPDATE users SET is_admin = true WHERE id = $1', [solo.user.id]);
+  const relogin = await api('POST', '/api/auth/login', { body: { email: solo.email, password: 'TestPassword123' } });
+  const token = relogin.data.accessToken;
+
+  // Demote every other admin created by earlier tests in this file so this
+  // account is genuinely the only one, then attempt (and expect to fail)
+  // its own self-demotion.
+  await query(`UPDATE users SET is_admin = false WHERE id <> $1 AND is_admin = true`, [solo.user.id]);
+
+  const attempt = await api('POST', `/api/admin/users/${solo.user.id}/admin`, {
+    token, body: { isAdmin: false },
+  });
+  assert.equal(attempt.status, 400);
+
+  // Still an admin afterwards.
+  const me = await api('GET', '/api/users/me', { token });
+  assert.equal(me.data.user.is_admin, true);
+});
+
+// ── One-click cancellation links ───────────────────────────────
+
+test('a cancel link previews without cancelling, then cancels on confirm', async () => {
+  const { accessToken: token } = await newUser('cancellink');
+  const created = await api('POST', '/api/subscriptions', {
+    token, body: { name: 'LinkTest', cost: 12.5, billingCycle: 'monthly' },
+  });
+  const subscriptionId = created.data.subscription.id;
+
+  const linkResponse = await api('POST', `/api/subscriptions/${subscriptionId}/cancel-link`, { token });
+  assert.equal(linkResponse.status, 200);
+  const tokenValue = linkResponse.data.url.split('/cancel/')[1];
+  assert.ok(tokenValue?.length > 20);
+
+  // GET must be side-effect free: a mail client or link scanner fetches it
+  // automatically, and that must never cancel anything.
+  const preview = await api('GET', `/api/public/cancel/${tokenValue}`);
+  assert.equal(preview.status, 200);
+  assert.equal(preview.data.name, 'LinkTest');
+  assert.equal(preview.data.alreadyCancelled, false);
+
+  const stillActive = await api('GET', `/api/subscriptions/${subscriptionId}`, { token });
+  assert.equal(stillActive.data.subscription.status, 'active', 'GET preview must not cancel');
+
+  const confirmed = await api('POST', `/api/public/cancel/${tokenValue}`);
+  assert.equal(confirmed.status, 200);
+  assert.equal(confirmed.data.alreadyCancelled, false);
+  assert.equal(confirmed.data.monthlySaving, 12.5);
+
+  const afterCancel = await api('GET', `/api/subscriptions/${subscriptionId}`, { token });
+  assert.equal(afterCancel.data.subscription.status, 'cancelled');
+
+  // Replaying an already-used token is idempotent, not an error.
+  const replay = await api('POST', `/api/public/cancel/${tokenValue}`);
+  assert.equal(replay.status, 200);
+  assert.equal(replay.data.alreadyCancelled, true);
+});
+
+test('an invalid or unknown cancel token is rejected', async () => {
+  const bogus = await api('GET', '/api/public/cancel/not-a-real-token-at-all');
+  assert.equal(bogus.status, 404);
+});
+
+test('cannot generate a new cancel link for an already-cancelled subscription', async () => {
+  const { accessToken: token } = await newUser('cancellink2');
+  const created = await api('POST', '/api/subscriptions', {
+    token, body: { name: 'AlreadyGone', cost: 5, billingCycle: 'monthly' },
+  });
+  await api('POST', `/api/subscriptions/${created.data.subscription.id}/cancel`, { token });
+
+  const linkAttempt = await api('POST', `/api/subscriptions/${created.data.subscription.id}/cancel-link`, { token });
+  assert.equal(linkAttempt.status, 400);
 });

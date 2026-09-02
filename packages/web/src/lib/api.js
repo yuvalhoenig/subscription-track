@@ -380,6 +380,7 @@ export const api = {
     payments: (params) => get(`/subscriptions/payments${qs(params)}`),
     addPayment: (id, body) => post(`/subscriptions/${id}/payments`, body),
     recordUsage: (id, body = { source: 'web' }) => post(`/subscriptions/${id}/usage`, body),
+    cancelLink: (id) => post(`/subscriptions/${id}/cancel-link`),
   },
 
   categories: {
@@ -444,6 +445,26 @@ export const api = {
       form.append('audio', blob, 'recording.webm');
       return post('/ai/voice/transcribe', form);
     },
+  },
+
+  admin: {
+    stats: () => get('/admin/stats'),
+    users: (params) => get(`/admin/users${qs(params)}`),
+    createUser: (payload) => post('/admin/users', payload),
+    userDetail: (id) => get(`/admin/users/${id}`),
+    setAdmin: (id, isAdmin) => post(`/admin/users/${id}/admin`, { isAdmin }),
+    forceLogout: (id) => post(`/admin/users/${id}/logout-all`),
+    deleteUser: (id) => del(`/admin/users/${id}`),
+    auditLog: () => get('/admin/audit-log'),
+  },
+
+  public: {
+    // No `auth: false` needed on GET (auth is skipped whenever there is no
+    // token to send), but confirm-cancel is a mutating POST and must never
+    // attempt the normal 401-triggers-a-refresh dance for a visitor who
+    // isn't signed in at all.
+    previewCancel: (token) => get(`/public/cancel/${token}`, { auth: false }),
+    confirmCancel: (token) => post(`/public/cancel/${token}`, undefined, { auth: false }),
   },
 
   health: () => get('/health', { auth: false }),

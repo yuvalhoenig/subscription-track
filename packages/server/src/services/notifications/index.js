@@ -22,6 +22,7 @@
 import { daysUntil, formatCurrency, monthlyCost, round2 } from '@subtrack/shared';
 import { many, one, query } from '../../db/pool.js';
 import { mailer } from '../mailer.js';
+import { createCancelLink } from '../cancelLinks.js';
 import { logger } from '../../lib/logger.js';
 
 const log = logger.child('notify');
@@ -266,12 +267,28 @@ export async function deliverDueNotifications({ limit = 50 } = {}) {
            FROM subscriptions WHERE user_id = $1 AND status = 'active'`,
         [notification.user_id],
       );
+      // Generated fresh at send time rather than at scheduling time, so
+      // the link is never older than the email itself. Wrapped: a race
+      // where the subscription was cancelled or removed between queuing
+      // and delivery must not stop the reminder from going out — it just
+      // goes out without the extra link that time.
+      let cancelUrl;
+      try {
+        cancelUrl = await createCancelLink(notification.user_id, subscription.id);
+      } catch (error) {
+        log.warn('Could not attach a cancel link to a reminder e-mail', {
+          subscriptionId: subscription.id,
+          error: error.message,
+        });
+      }
+
       await mailer.renewalReminderEmail({
         to: user.email,
         name: user.name,
         subscription,
         daysUntil: daysUntil(subscription.renewal_date),
         monthlyTotal: formatCurrency(totals?.monthly ?? 0, user.currency),
+        cancelUrl,
       });
     } else {
       await mailer.send({

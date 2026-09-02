@@ -182,6 +182,7 @@ export function AppShell({ title, actions, children }) {
   const isMobile = useIsMobile();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
+  const { user } = useAuth();
 
   // Navigating on mobile should close the drawer, or it covers the page
   // the user just asked for.
@@ -214,6 +215,18 @@ export function AppShell({ title, actions, children }) {
             </NavLink>
           ))}
         </nav>
+
+        {user?.is_admin ? (
+          <>
+            <div className="nav-section">Admin</div>
+            <nav className="nav">
+              <NavLink to="/admin" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+                <Icon name="users" size={17} />
+                Admin Panel
+              </NavLink>
+            </nav>
+          </>
+        ) : null}
 
         <div className="nav-section">Account</div>
         <nav className="nav">

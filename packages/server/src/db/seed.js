@@ -201,8 +201,8 @@ async function seed({ resetAll = false } = {}) {
     const user = await db.one(
       `INSERT INTO users
          (email, password_hash, name, currency, locale, timezone, email_verified,
-          monthly_budget, preferences, last_login_at)
-       VALUES ($1,$2,$3,'USD','en','America/New_York',true,325,$4,now())
+          is_admin, monthly_budget, preferences, last_login_at)
+       VALUES ($1,$2,$3,'USD','en','America/New_York',true,true,325,$4,now())
        RETURNING id`,
       [
         email,
@@ -493,7 +493,7 @@ async function seed({ resetAll = false } = {}) {
   });
 
   process.stdout.write(
-    `\n  Demo account ready\n` +
+    `\n  Demo account ready (admin access included)\n` +
       `    e-mail:    ${email}\n` +
       `    password:  ${config.demo.password}\n\n` +
       `    ${totals.subs} subscriptions, ${totals.payments} payments, ` +

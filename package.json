@@ -24,7 +24,9 @@
     "db:seed": "npm run db:seed --workspace @subtrack/server",
     "db:reset": "npm run db:reset --workspace @subtrack/server",
     "test": "npm run test --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present"
+    "lint": "npm run lint --workspaces --if-present",
+    "admin:promote": "npm run admin:promote --workspace @subtrack/server --",
+    "admin:create": "npm run admin:create --workspace @subtrack/server --"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

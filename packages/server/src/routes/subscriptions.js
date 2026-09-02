@@ -18,6 +18,7 @@ import { requireAuth } from '../middleware/auth.js';
 import * as subs from '../services/subscriptions.js';
 import { categorise, userCategoryNames } from '../services/ai/categorize.js';
 import { ensureCategory } from '../services/categories.js';
+import { createCancelLink } from '../services/cancelLinks.js';
 
 export const subscriptionsRouter = Router();
 subscriptionsRouter.use(requireAuth);
@@ -191,6 +192,13 @@ subscriptionsRouter.post(
     res.status(201).json({
       payment: await subs.recordPayment(req.user.id, req.params.id, req.body),
     });
+  }),
+);
+
+subscriptionsRouter.post(
+  '/:id/cancel-link',
+  asyncHandler(async (req, res) => {
+    res.json({ url: await createCancelLink(req.user.id, req.params.id) });
   }),
 );
 

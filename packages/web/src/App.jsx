@@ -11,6 +11,7 @@ import { DesktopBridge } from './components/DesktopBridge.jsx';
 import {
   LoginPage, RegisterPage, ForgotPasswordPage, ResetPasswordPage, VerifyEmailPage,
 } from './pages/Auth.jsx';
+import { CancelLinkPage } from './pages/CancelLink.jsx';
 
 // Route-level code splitting: the dashboard's chart bundle is large, and
 // someone landing on /login should not download it.
@@ -20,6 +21,7 @@ const CalendarPage = lazy(() => import('./pages/Calendar.jsx'));
 const InsightsPage = lazy(() => import('./pages/Insights.jsx'));
 const AssistantPage = lazy(() => import('./pages/Assistant.jsx'));
 const SettingsPage = lazy(() => import('./pages/Settings.jsx'));
+const AdminPage = lazy(() => import('./pages/Admin.jsx'));
 
 /**
  * Electron loads the app over file://, where the History API cannot
@@ -51,6 +53,14 @@ function RedirectIfAuthenticated({ children }) {
   return children;
 }
 
+/** Signed-in but not an admin: sent home rather than shown a 403 page. */
+function RequireAdmin({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <Loading label="" />;
+  if (!user?.is_admin) return <Navigate to="/" replace />;
+  return children;
+}
+
 /** The authenticated shell: routes plus the floating assistant. */
 function AppRoutes() {
   return (
@@ -61,6 +71,7 @@ function AppRoutes() {
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route path="/cancel/:token" element={<CancelLinkPage />} />
 
         <Route path="/" element={<RequireAuth><DashboardPage /></RequireAuth>} />
         <Route path="/subscriptions" element={<RequireAuth><SubscriptionsPage /></RequireAuth>} />
@@ -69,6 +80,16 @@ function AppRoutes() {
         <Route path="/insights" element={<RequireAuth><InsightsPage /></RequireAuth>} />
         <Route path="/assistant" element={<RequireAuth><AssistantPage /></RequireAuth>} />
         <Route path="/settings" element={<RequireAuth><SettingsPage /></RequireAuth>} />
+        <Route
+          path="/admin"
+          element={(
+            <RequireAuth>
+              <RequireAdmin>
+                <AdminPage />
+              </RequireAdmin>
+            </RequireAuth>
+          )}
+        />
 
         {/* Anything else goes home rather than showing a dead end. */}
         <Route path="*" element={<Navigate to="/" replace />} />

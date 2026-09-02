@@ -31,7 +31,7 @@ import { logger } from '../lib/logger.js';
 const log = logger.child('accounts');
 
 const PUBLIC_USER_COLUMNS = `id, email, name, avatar_url, currency, locale, timezone,
-  email_verified, monthly_budget, preferences, created_at, last_login_at`;
+  email_verified, is_admin, monthly_budget, preferences, created_at, last_login_at`;
 
 const VERIFY_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -47,7 +47,7 @@ const DUMMY_HASH = bcrypt.hashSync('subtrack-timing-equaliser', config.auth.bcry
 export const hashPassword = (plain) => bcrypt.hash(plain, config.auth.bcryptRounds);
 
 /** Seed a new account with the default category set. */
-async function createDefaultCategories(db, userId) {
+export async function createDefaultCategories(db, userId) {
   const values = [];
   const params = [];
   DEFAULT_CATEGORIES.forEach((category, index) => {
@@ -83,20 +83,33 @@ async function createAuthToken(db, userId, kind, ttlMs) {
   return token;
 }
 
+/**
+ * Shape the user object returned to the client.
+ *
+ * Deliberately snake_case, matching the raw column names GET /users/me
+ * returns from middleware/auth.js's loadUser query. Those two previously
+ * disagreed (this function returned camelCase like `emailVerified` while
+ * /users/me returned `email_verified`), which meant a component reading
+ * `user.email_verified` saw `undefined` — and therefore treated the address
+ * as unverified — until the next full page load refreshed the session from
+ * /users/me. Using one shape everywhere removes that gap, and is what lets
+ * `is_admin` be trusted immediately after login/register/refresh too.
+ */
 function sessionFor(user, refreshToken) {
   return {
     user: {
       id: user.id,
       email: user.email,
       name: user.name,
-      avatarUrl: user.avatar_url ?? null,
+      avatar_url: user.avatar_url ?? null,
       currency: user.currency,
       locale: user.locale,
       timezone: user.timezone,
-      emailVerified: user.email_verified,
-      monthlyBudget: user.monthly_budget,
+      email_verified: user.email_verified,
+      is_admin: Boolean(user.is_admin),
+      monthly_budget: user.monthly_budget,
       preferences: user.preferences ?? {},
-      createdAt: user.created_at,
+      created_at: user.created_at,
     },
     accessToken: signAccessToken(user),
     refreshToken,

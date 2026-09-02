@@ -12,7 +12,9 @@
     "db:seed": "node src/db/seed.js",
     "db:reset": "node src/db/migrate.js --reset && node src/db/seed.js",
     "test": "NODE_ENV=test node --test --test-concurrency=1 \"test/*.test.js\"",
-    "test:migrate": "NODE_ENV=test node src/db/migrate.js"
+    "test:migrate": "NODE_ENV=test node src/db/migrate.js",
+    "admin:promote": "node src/db/promote-admin.js",
+    "admin:create": "node src/db/create-admin.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
