@@ -1,6 +1,6 @@
 /** Subscription list: filter, sort, edit, cancel, delete, export. */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { formatCurrency, formatRelativeDays, CYCLE_LABELS } from '@subtrack/shared';
 import { AppShell } from '../components/AppShell.jsx';
 import { Icon } from '../components/Icon.jsx';
@@ -31,6 +31,14 @@ export function SubscriptionsPage() {
   const [busy, setBusy] = useState(false);
 
   const debouncedSearch = useDebounced(search, 250);
+
+  // The desktop app's File → New Subscription menu item (Cmd+N) reaches the
+  // page through this event rather than through the router.
+  useEffect(() => {
+    const open = () => { setEditing(null); setShowForm(true); };
+    window.addEventListener('subtrack:new-subscription', open);
+    return () => window.removeEventListener('subtrack:new-subscription', open);
+  }, []);
 
   const categories = useAsync(() => api.categories.list(), []);
   const subscriptions = useAsync(

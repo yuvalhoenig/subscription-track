@@ -1,6 +1,6 @@
 /** Full-page assistant: the chat widget with room to breathe. */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell.jsx';
 import { Icon } from '../components/Icon.jsx';
 import { Button, Empty, Alert } from '../components/ui.jsx';
@@ -30,6 +30,16 @@ export function AssistantPage() {
    */
   const [emailText, setEmailText] = useState('');
   const [candidates, setCandidates] = useState(null);
+
+  // A Mail.app scan started from the desktop menu delivers its candidates
+  // here, so the same import UI serves both paths.
+  useEffect(() => {
+    const onCandidates = (event) => {
+      setCandidates(event.detail?.candidates ?? []);
+    };
+    window.addEventListener('subtrack:mail-candidates', onCandidates);
+    return () => window.removeEventListener('subtrack:mail-candidates', onCandidates);
+  }, []);
 
   const scanEmail = async () => {
     if (!emailText.trim()) return;

@@ -73,6 +73,7 @@ export function setTokens({ accessToken: access, refreshToken: refresh } = {}) {
     refreshToken = refresh;
     writeStorage(REFRESH_KEY, refresh);
   }
+  syncSessionToDesktop();
 }
 
 export function clearTokens() {
@@ -80,6 +81,7 @@ export function clearTokens() {
   refreshToken = null;
   writeStorage(ACCESS_KEY, null);
   writeStorage(REFRESH_KEY, null);
+  syncSessionToDesktop();
 }
 
 export function getAccessToken() {
@@ -109,6 +111,11 @@ export class ApiError extends Error {
   /** True for a lost connection or an unreachable server. */
   get isNetworkError() {
     return this.code === 'network_error';
+  }
+
+  /** True when the desktop app accepted a write to replay later. */
+  get isQueuedOffline() {
+    return this.code === 'queued_offline';
   }
 
   get isValidationError() {
@@ -159,6 +166,70 @@ async function refreshSession() {
 }
 
 /**
+ * The Electron preload bridge, when running inside the desktop app.
+ * Absent in a browser, so every use is guarded.
+ */
+const desktop = () => (typeof window !== 'undefined' ? window.subtrack : undefined);
+
+export const isDesktop = () => Boolean(desktop()?.isDesktop);
+
+/**
+ * Mirror the session into the desktop store.
+ *
+ * The main process needs the tokens independently of any open window: the
+ * menu bar item and the notification poller keep working after the window
+ * is closed.
+ */
+function syncSessionToDesktop() {
+  const bridge = desktop();
+  if (!bridge?.session) return;
+  const tokens = { accessToken, refreshToken };
+  if (!tokens.accessToken && !tokens.refreshToken) bridge.session.clear().catch(() => {});
+  else bridge.session.set(tokens).catch(() => {});
+}
+
+/**
+ * Adopt a session the main process already holds.
+ * Called once at startup so relaunching the desktop app does not require
+ * signing in again.
+ */
+export async function adoptDesktopSession() {
+  const bridge = desktop();
+  if (!bridge?.session) return false;
+  try {
+    const tokens = await bridge.session.get();
+    if (tokens?.accessToken || tokens?.refreshToken) {
+      setTokens(tokens);
+      return true;
+    }
+  } catch {
+    /* bridge unavailable */
+  }
+  return false;
+}
+
+/** Replay anything queued while offline. Safe to call repeatedly. */
+export async function flushOfflineQueue() {
+  const bridge = desktop();
+  if (!bridge?.offline) return { flushed: 0 };
+  try {
+    return await bridge.offline.flush();
+  } catch {
+    return { flushed: 0 };
+  }
+}
+
+export async function pendingOfflineWrites() {
+  const bridge = desktop();
+  if (!bridge?.offline) return 0;
+  try {
+    return await bridge.offline.pending();
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Issue an API request.
  *
  * @param {string} path      Path under /api, e.g. '/subscriptions'.
@@ -188,6 +259,31 @@ export async function request(path, { method = 'GET', body, auth = true, raw = f
     });
   } catch (error) {
     if (error.name === 'AbortError') throw error;
+
+    /**
+     * Offline. In the desktop app this is recoverable rather than fatal:
+     *  - reads fall back to the on-disk cache, so the app stays readable;
+     *  - writes are queued in order and replayed on reconnect.
+     * In a browser there is nowhere to fall back to, so it stays an error.
+     */
+    const bridge = desktop();
+    if (bridge?.offline) {
+      if (method === 'GET') {
+        const cached = await bridge.offline.readCache(path).catch(() => null);
+        if (cached) {
+          return { ...cached.value, __fromCache: true, __cachedAt: cached.at };
+        }
+      } else if (!isFormData) {
+        // FormData (receipt uploads) cannot be serialised into the queue,
+        // so those still fail rather than silently disappearing.
+        const pending = await bridge.offline.enqueue({ path, method, body }).catch(() => 0);
+        throw new ApiError(
+          `Saved locally. ${pending} change${pending === 1 ? '' : 's'} will sync when you are back online.`,
+          { code: 'queued_offline', status: 0, details: { pending } },
+        );
+      }
+    }
+
     throw new ApiError(
       'Could not reach the server. Check your connection and try again.',
       { code: 'network_error', status: 0 },
@@ -226,6 +322,11 @@ export async function request(path, { method = 'GET', body, auth = true, raw = f
       details: error.details,
       requestId: error.requestId,
     });
+  }
+
+  // Keep the desktop cache warm on every successful read.
+  if (method === 'GET') {
+    desktop()?.offline?.writeCache(path, payload)?.catch?.(() => {});
   }
 
   return payload;

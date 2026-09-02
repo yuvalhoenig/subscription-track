@@ -1,0 +1,87 @@
+# electron-builder configuration for the macOS app.
+#
+#   npm run build:desktop        # from the repo root: builds the web bundle,
+#                                # then packages the .dmg and .zip
+#   npm run build:dir --workspace @subtrack/desktop   # unpacked, for testing
+#
+# The renderer is the web package's production build, copied into
+# Resources/renderer, so the desktop app and the web app are literally the
+# same UI.
+appId: app.subtrack.desktop
+productName: SubTrack
+copyright: Copyright © 2026 SubTrack
+
+directories:
+  output: release
+  buildResources: assets
+
+files:
+  - src/**/*
+  - package.json
+
+extraResources:
+  # The built web app. `npm run build:desktop` produces this first.
+  - from: ../web/dist
+    to: renderer
+    filter:
+      - '**/*'
+
+mac:
+  category: public.app-category.finance
+  icon: assets/icon.png
+  # Universal binary so one download covers Apple silicon and Intel.
+  target:
+    - target: dmg
+      arch: [universal]
+    - target: zip
+      arch: [universal]
+  # Hardened runtime is required for notarisation; the entitlements below
+  # re-open the specific holes the app genuinely needs.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: assets/entitlements.mac.plist
+  entitlementsInherit: assets/entitlements.mac.plist
+  extendInfo:
+    # macOS shows these strings in its permission prompts, so they explain
+    # why the app is asking rather than leaving the user guessing.
+    NSMicrophoneUsageDescription: >-
+      SubTrack uses the microphone for voice commands, so you can add
+      subscriptions and ask questions by speaking.
+    NSSpeechRecognitionUsageDescription: >-
+      SubTrack transcribes your voice on-device to understand commands
+      like "add Netflix for $15.99 a month".
+    NSAppleEventsUsageDescription: >-
+      SubTrack reads recent subscription confirmation e-mails from Mail to
+      find subscriptions you may not be tracking. Nothing is sent anywhere
+      without your confirmation.
+    # The menu bar item is the point of the desktop app; it should be able
+    # to run without a Dock icon.
+    LSUIElement: false
+    LSMinimumSystemVersion: '11.0'
+
+dmg:
+  title: SubTrack ${version}
+  # Standard drag-to-Applications layout.
+  contents:
+    - x: 140
+      y: 200
+      type: file
+    - x: 400
+      y: 200
+      type: link
+      path: /Applications
+
+win:
+  target: nsis
+  icon: assets/icon.png
+
+linux:
+  target: AppImage
+  icon: assets/icon.png
+  category: Finance
+
+# Notarisation runs only when credentials are present in the environment
+# (APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID), so an unsigned
+# local build still succeeds.
+afterSign: null
+publish: null
