@@ -7,6 +7,7 @@
  */
 
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { formatCurrency, formatDate } from '@subtrack/shared';
 import { AppShell } from '../components/AppShell.jsx';
 import { Icon } from '../components/Icon.jsx';
@@ -59,11 +60,25 @@ function OverviewTab() {
 }
 
 function UserDetailModal({ userId, onClose, onChanged }) {
-  const { user: me } = useAuth();
+  const { user: me, impersonate } = useAuth();
   const toast = useToast();
+  const navigate = useNavigate();
   const detail = useAsync(() => api.admin.userDetail(userId), [userId]);
   const [confirming, setConfirming] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  const logInAsUser = async () => {
+    setBusy(true);
+    try {
+      await impersonate(userId);
+      onClose();
+      navigate('/');
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const act = async (action, label) => {
     setBusy(true);
@@ -125,6 +140,17 @@ function UserDetailModal({ userId, onClose, onChanged }) {
             />
             <span className="small secondary">Admin access</span>
             <div className="grow" />
+            {userId !== me?.id && !detail.data.user.is_admin ? (
+              <Button
+                size="sm"
+                variant="soft"
+                icon="eye"
+                onClick={logInAsUser}
+                disabled={busy}
+              >
+                Log in as user
+              </Button>
+            ) : null}
             <Button
               size="sm"
               icon="logout"

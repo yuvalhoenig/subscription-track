@@ -20,6 +20,7 @@ import { notFound, badRequest, conflict } from '../lib/errors.js';
 import { revokeAllSessions, hashPassword, createDefaultCategories } from './accounts.js';
 import { invalidateUser } from '../middleware/auth.js';
 import { aiEnabled, config } from '../config/index.js';
+import { signAccessToken } from '../lib/tokens.js';
 import { logger } from '../lib/logger.js';
 
 const log = logger.child('admin');
@@ -221,6 +222,59 @@ export async function setUserAdmin(actingAdminId, targetUserId, isAdmin) {
   await invalidateUser(targetUserId);
   await logAdminAction(actingAdminId, isAdmin ? 'grant_admin' : 'revoke_admin', { targetUserId });
   return user;
+}
+
+/**
+ * Issue a short-lived access token that lets a support admin see the app
+ * exactly as one user sees it, without ever touching that user's password.
+ *
+ * Deliberately narrower than a real sign-in:
+ *  - No refresh token is issued, so the session cannot outlive the access
+ *    token's normal TTL (`config.auth.accessTtl`) — it expires on its own,
+ *    there is nothing to revoke.
+ *  - The token carries an `act` claim naming the acting admin, which
+ *    `requireAdmin` uses to refuse admin-panel access on an impersonation
+ *    token even if the impersonated account is itself an admin.
+ *  - Impersonating another admin is refused outright: the whole point is
+ *    "see what a user sees to help them", not "borrow a peer admin's
+ *    session".
+ */
+export async function impersonateUser(actingAdminId, targetUserId) {
+  if (actingAdminId === targetUserId) {
+    throw badRequest('You are already signed in as yourself.');
+  }
+  const user = await one(
+    `SELECT id, email, name, avatar_url, currency, locale, timezone,
+            email_verified, is_admin, monthly_budget, preferences, created_at
+       FROM users WHERE id = $1`,
+    [targetUserId],
+  );
+  if (!user) throw notFound('User not found');
+  if (user.is_admin) throw badRequest('Cannot impersonate another admin account.');
+
+  const admin = await one('SELECT email FROM users WHERE id = $1', [actingAdminId]);
+
+  await logAdminAction(actingAdminId, 'impersonate_start', { targetUserId, detail: { email: user.email } });
+
+  return {
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      avatar_url: user.avatar_url ?? null,
+      currency: user.currency,
+      locale: user.locale,
+      timezone: user.timezone,
+      email_verified: user.email_verified,
+      is_admin: false,
+      monthly_budget: user.monthly_budget,
+      preferences: user.preferences ?? {},
+      created_at: user.created_at,
+    },
+    accessToken: signAccessToken(user, { impersonatedBy: actingAdminId }),
+    expiresIn: config.auth.accessTtl,
+    impersonating: { adminId: actingAdminId, adminEmail: admin?.email ?? null },
+  };
 }
 
 /** Sign a user out of every device. Useful for a compromised or abusive account. */

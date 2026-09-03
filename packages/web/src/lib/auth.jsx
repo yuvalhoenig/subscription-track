@@ -1,12 +1,35 @@
 /** Authentication context: the session, and the actions that change it. */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { api, setTokens, clearTokens, hasSession, onAuthLost } from './api.js';
+import {
+  api, setTokens, clearTokens, hasSession, onAuthLost,
+  beginImpersonation, endImpersonation, onImpersonationEnded,
+} from './api.js';
 
 const AuthContext = createContext(null);
+const IMPERSONATION_META_KEY = 'subtrack.impersonating_meta';
+
+function readImpersonationMeta() {
+  try {
+    const raw = sessionStorage.getItem(IMPERSONATION_META_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeImpersonationMeta(meta) {
+  try {
+    if (meta) sessionStorage.setItem(IMPERSONATION_META_KEY, JSON.stringify(meta));
+    else sessionStorage.removeItem(IMPERSONATION_META_KEY);
+  } catch {
+    /* Non-fatal: the banner just won't survive a reload. */
+  }
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
+  const [impersonating, setImpersonating] = useState(readImpersonationMeta);
   // `loading` covers the initial "do we have a valid session?" check, so
   // the router can hold off deciding between the app and the login page.
   const [loading, setLoading] = useState(hasSession());
@@ -37,6 +60,15 @@ export function AuthProvider({ children }) {
   // leaving a broken UI.
   useEffect(() => onAuthLost(() => setUser(null)), []);
 
+  // An impersonation token expiring mid-session restores the admin's own
+  // access token under the hood; reload the admin's own user here so the
+  // UI (banner included) reflects that rather than keeping stale state.
+  useEffect(() => onImpersonationEnded(() => {
+    writeImpersonationMeta(null);
+    setImpersonating(null);
+    api.users.me().then(({ user: me }) => setUser(me)).catch(() => setUser(null));
+  }), []);
+
   const applySession = useCallback((session) => {
     setTokens(session);
     setUser(session.user);
@@ -57,6 +89,38 @@ export function AuthProvider({ children }) {
     })),
     [applySession],
   );
+
+  /** Admin-only: swap into a support session that sees the app as `targetUserId` does. */
+  const impersonate = useCallback(async (targetUserId) => {
+    const session = await api.admin.impersonate(targetUserId);
+    beginImpersonation({ accessToken: session.accessToken });
+    const meta = {
+      adminEmail: session.impersonating.adminEmail,
+      targetEmail: session.user.email,
+      targetId: session.user.id,
+    };
+    writeImpersonationMeta(meta);
+    setImpersonating(meta);
+    setUser(session.user);
+    return session.user;
+  }, []);
+
+  /** Return from an impersonated session to the admin's own. */
+  const stopImpersonating = useCallback(async () => {
+    const restored = endImpersonation();
+    writeImpersonationMeta(null);
+    setImpersonating(null);
+    if (!restored) {
+      setUser(null);
+      return;
+    }
+    try {
+      const { user: me } = await api.users.me();
+      setUser(me);
+    } catch {
+      setUser(null);
+    }
+  }, []);
 
   const logout = useCallback(async () => {
     try {
@@ -80,8 +144,12 @@ export function AuthProvider({ children }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, login, register, logout, patchUser, refreshUser, isAuthenticated: Boolean(user) }),
-    [user, loading, login, register, logout, patchUser, refreshUser],
+    () => ({
+      user, loading, login, register, logout, patchUser, refreshUser,
+      isAuthenticated: Boolean(user),
+      impersonating, impersonate, stopImpersonating,
+    }),
+    [user, loading, login, register, logout, patchUser, refreshUser, impersonating, impersonate, stopImpersonating],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

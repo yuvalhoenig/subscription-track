@@ -39,13 +39,23 @@ export function safeEqual(a, b) {
   return crypto.timingSafeEqual(left, right);
 }
 
-export function signAccessToken(user) {
+/**
+ * @param {object} [options]
+ * @param {string} [options.impersonatedBy] Admin user id, when this token
+ *   grants a support admin a session as `user` rather than `user` signing in
+ *   themselves. Carried as the `act` ("actor") claim so `requireAdmin` can
+ *   refuse it for admin routes even if the impersonated account is itself an
+ *   admin — impersonation must never be a path to a *different* admin's
+ *   panel access than the actor already had.
+ */
+export function signAccessToken(user, { impersonatedBy } = {}) {
   return jwt.sign(
     {
       sub: user.id,
       email: user.email,
       // Claim used by routes that require a verified address.
       ev: Boolean(user.email_verified),
+      ...(impersonatedBy ? { act: impersonatedBy } : {}),
     },
     config.auth.accessSecret,
     {

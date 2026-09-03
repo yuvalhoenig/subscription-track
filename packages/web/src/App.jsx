@@ -8,6 +8,7 @@ import { ToastProvider } from './lib/toast.jsx';
 import { Loading } from './components/ui.jsx';
 import { ChatWidget } from './components/ChatWidget.jsx';
 import { DesktopBridge } from './components/DesktopBridge.jsx';
+import { ImpersonationBanner } from './components/ImpersonationBanner.jsx';
 import {
   LoginPage, RegisterPage, ForgotPasswordPage, ResetPasswordPage, VerifyEmailPage,
 } from './pages/Auth.jsx';
@@ -112,6 +113,7 @@ export function App() {
       <Router>
         <AuthProvider>
           <ToastProvider>
+            <ImpersonationBanner />
             <AppRoutes />
             <FloatingAssistant />
             {/* Inert in a browser; wires up the Electron integrations. */}

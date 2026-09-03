@@ -68,6 +68,13 @@ adminRouter.post(
 );
 
 adminRouter.post(
+  '/users/:id/impersonate',
+  asyncHandler(async (req, res) => {
+    res.json(await admin.impersonateUser(req.user.id, req.params.id));
+  }),
+);
+
+adminRouter.post(
   '/users/:id/logout-all',
   asyncHandler(async (req, res) => {
     res.json(await admin.forceLogoutUser(req.user.id, req.params.id));

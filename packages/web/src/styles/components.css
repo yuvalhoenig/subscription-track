@@ -465,6 +465,32 @@
 .toast-error { border-left-color: var(--danger); }
 .toast-warning { border-left-color: var(--warning); }
 
+/* ── Impersonation banner ── */
+.impersonation-banner {
+  position: sticky;
+  top: 0;
+  z-index: 210;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-5);
+  background: var(--warning);
+  color: var(--warning-contrast, #1a1200);
+  font-size: var(--text-sm);
+}
+.impersonation-banner strong { font-weight: 600; }
+.impersonation-banner-return {
+  margin-left: auto;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  border-radius: var(--radius);
+  padding: 2px var(--space-3);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.impersonation-banner-return:disabled { opacity: 0.6; cursor: default; }
+
 /* ── Empty & loading states ── */
 .empty {
   display: flex;

@@ -42,6 +42,71 @@ function notifyAuthLost() {
   for (const listener of listeners) listener();
 }
 
+// ── Admin impersonation ("view as user") ───────────────────────
+//
+// An impersonation access token is deliberately not refreshable (the admin
+// endpoint that issues it never hands out a refresh token — see
+// admin.impersonateUser on the server). So instead of the normal refresh
+// dance, a 401 while impersonating just ends the impersonation and restores
+// the admin's own access token, which is kept aside in sessionStorage rather
+// than overwritten.
+
+const ADMIN_RETURN_KEY = 'subtrack.admin_return';
+let adminReturnToken = null;
+
+function readAdminReturnToken() {
+  if (adminReturnToken === null) {
+    try {
+      adminReturnToken = sessionStorage.getItem(ADMIN_RETURN_KEY) ?? '';
+    } catch {
+      adminReturnToken = '';
+    }
+  }
+  return adminReturnToken || null;
+}
+
+export function isImpersonating() {
+  return Boolean(readAdminReturnToken());
+}
+
+/** Swap in an impersonation session, stashing the admin's own token to return to. */
+export function beginImpersonation({ accessToken: impersonatedAccessToken }) {
+  const current = getAccessToken();
+  adminReturnToken = current ?? '';
+  try {
+    sessionStorage.setItem(ADMIN_RETURN_KEY, adminReturnToken);
+  } catch {
+    /* Non-fatal: "return to admin" simply won't survive a reload. */
+  }
+  setTokens({ accessToken: impersonatedAccessToken });
+}
+
+/** Restore the admin's own session. Returns false if there was nothing to return to. */
+export function endImpersonation() {
+  const token = readAdminReturnToken();
+  adminReturnToken = '';
+  try {
+    sessionStorage.removeItem(ADMIN_RETURN_KEY);
+  } catch {
+    /* ignore */
+  }
+  if (!token) return false;
+  setTokens({ accessToken: token });
+  return true;
+}
+
+const impersonationListeners = new Set();
+
+/** Called when an impersonation session ends on its own (token expiry). */
+export function onImpersonationEnded(listener) {
+  impersonationListeners.add(listener);
+  return () => impersonationListeners.delete(listener);
+}
+
+function notifyImpersonationEnded() {
+  for (const listener of impersonationListeners) listener();
+}
+
 function readStorage(key) {
   try {
     return sessionStorage.getItem(key) ?? localStorage.getItem(key);
@@ -293,6 +358,20 @@ export async function request(path, { method = 'GET', body, auth = true, raw = f
   if (response.status === 401 && auth && retry) {
     const payload = await parseResponse(response);
     const code = payload?.error?.code;
+
+    // An impersonation token is never refreshed (the server never issues it
+    // a refresh token to begin with) — it just expires. Restore the admin's
+    // own session rather than falling through to the normal refresh/logout
+    // path, which would otherwise sign the admin out entirely.
+    if (isImpersonating()) {
+      endImpersonation();
+      notifyImpersonationEnded();
+      throw new ApiError('Your "view as" session has ended.', {
+        status: 401,
+        code: 'impersonation_expired',
+      });
+    }
+
     // Only an expired token is worth refreshing. A revoked or reused one
     // means the session is genuinely over.
     if (code === 'token_expired' || code === 'unauthorized') {
@@ -453,6 +532,7 @@ export const api = {
     createUser: (payload) => post('/admin/users', payload),
     userDetail: (id) => get(`/admin/users/${id}`),
     setAdmin: (id, isAdmin) => post(`/admin/users/${id}/admin`, { isAdmin }),
+    impersonate: (id) => post(`/admin/users/${id}/impersonate`),
     forceLogout: (id) => post(`/admin/users/${id}/logout-all`),
     deleteUser: (id) => del(`/admin/users/${id}`),
     auditLog: () => get('/admin/audit-log'),
